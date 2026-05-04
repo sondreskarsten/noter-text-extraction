@@ -44,9 +44,17 @@ def extract_kv(raw_text: str) -> dict:
 def _detect_headers(lines: list[str]) -> list[dict]:
     """Two header kinds:
       - 'year': trailing tab-cells are years
-      - 'field': all tab-cells are short text labels"""
+      - 'field': all tab-cells are short text labels
+
+    Multi-line continuation: if a 'field' header at line i is followed by
+    another all-text line at i+1 with no data rows in between, merge them
+    (line N+1 cell j appended to line N cell j). This handles wrapped
+    column headers like 'Aksjekapital\\tAnnen innskutt' / 'egenkapital\\tSum'."""
     headers = []
+    skip = set()
     for i, ln in enumerate(lines):
+        if i in skip:
+            continue
         years = _trailing_year_cells(ln)
         if years:
             headers.append({"line_idx": i, "kind": "year", "column_labels": years})
@@ -58,7 +66,26 @@ def _detect_headers(lines: list[str]) -> list[dict]:
                 continue
         cells = [c.strip() for c in ln.split("\t") if c.strip()]
         if len(cells) >= 2 and all(_looks_like_field_label(c) for c in cells):
-            headers.append({"line_idx": i, "kind": "field", "column_labels": cells})
+            merged_cells = list(cells)
+            next_i = i + 1
+            while next_i < len(lines):
+                next_ln = lines[next_i]
+                if not next_ln.strip():
+                    next_i += 1
+                    continue
+                next_cells = [c.strip() for c in next_ln.split("\t") if c.strip()]
+                if next_cells and all(_looks_like_field_label(c) for c in next_cells):
+                    if len(next_cells) <= len(merged_cells) + 1:
+                        for j, nc in enumerate(next_cells):
+                            if j < len(merged_cells):
+                                merged_cells[j] = f"{merged_cells[j]} {nc}"
+                            else:
+                                merged_cells.append(nc)
+                        skip.add(next_i)
+                        next_i += 1
+                        continue
+                break
+            headers.append({"line_idx": i, "kind": "field", "column_labels": merged_cells})
     return headers
 
 
