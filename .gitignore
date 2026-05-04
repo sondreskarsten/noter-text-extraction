@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/
+.env
+.DS_Store
+*.swp
+.pytest_cache/
+
+# Local data
+/tmp_data/
+/audit_out/

@@ -1,0 +1,31 @@
+[project]
+name = "noter-text-extraction"
+version = "0.1.0"
+description = "Deterministic PDF -> structured JSON for Norwegian årsregnskap notes"
+requires-python = ">=3.10"
+dependencies = [
+    "google-cloud-storage>=2.0",
+    "pdfplumber>=0.11",
+    "pypdfium2>=4.0",
+]
+
+[project.optional-dependencies]
+ocr = [
+    "pytesseract>=0.3",
+    "pillow>=10.0",
+]
+schema_match = [
+    "rapidfuzz>=3.0",
+    "sentence-transformers>=2.5",
+    "torch>=2.0",
+]
+test = [
+    "pytest>=7.0",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
