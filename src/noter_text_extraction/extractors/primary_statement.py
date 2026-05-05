@@ -96,7 +96,10 @@ def _try_two_number_split(col: str) -> tuple[float | None, float | None]:
     return (v1, v2)
 
 
-def _extract_columns(line: str, label: str) -> tuple[list[float], str]:
+def _extract_columns(line: str, label: str) -> tuple[list[float], str, list[int]]:
+    """Returns (nums, tail, col_positions). col_positions[i] gives the
+    1-indexed tab-column origin of nums[i] (1 = first column = year_curr,
+    2 = second column = year_prev, ...). 0 means split-derived (no tab origin)."""
     if label:
         idx = line.lower().find(label.lower())
         tail = line[idx + len(label):]
@@ -104,11 +107,17 @@ def _extract_columns(line: str, label: str) -> tuple[list[float], str]:
         tail = line
     has_tab = "\t" in tail
     cols = [c.strip() for c in tail.split("\t")]
-    cols_nonempty = [c for c in cols if c]
+    cols_nonempty_with_pos = [(i, c) for i, c in enumerate(cols) if c]
     nums: list[float] = []
-    for c in cols:
+    positions: list[int] = []
+
+    skipped_cols: list[tuple[int, str]] = []
+
+    nonempty_seq = 0
+    for col_tab_idx, c in enumerate(cols):
         if not c:
             continue
+        nonempty_seq += 1
         cleaned = c.replace(" ", "").replace("\u00a0", "").replace(",", "").replace("-", "")
         if len(cleaned) <= 3 and cleaned.replace("l", "1").replace("O", "0").replace("o", "0").isdigit():
             continue
@@ -116,35 +125,44 @@ def _extract_columns(line: str, label: str) -> tuple[list[float], str]:
             v1, v2 = _try_two_number_split(c)
             if v1 is not None and v2 is not None:
                 nums.extend([v1, v2])
+                positions.extend([0, 0])
                 continue
             if v1 is not None:
                 nums.append(v1)
+                positions.append(0)
                 continue
         v = normalize_amount(c)
         if v is not None:
             nums.append(v)
+            positions.append(nonempty_seq)
             continue
         v1, v2 = _try_two_number_split(c)
         if v1 is not None:
             nums.append(v1)
+            positions.append(nonempty_seq)
+        else:
+            skipped_cols.append((nonempty_seq, c))
         if v2 is not None:
             nums.append(v2)
-    if len(nums) == 0 and len(cols_nonempty) == 1:
-        v1, v2 = _try_two_number_split(cols_nonempty[0])
+            positions.append(0)
+
+    if len(nums) == 0 and len(cols_nonempty_with_pos) == 1:
+        v1, v2 = _try_two_number_split(cols_nonempty_with_pos[0][1])
         if v1 is not None and v2 is not None:
-            return [v1, v2], tail
-    if len(nums) == 1 and len(cols_nonempty) == 1:
-        tokens = cols_nonempty[0].split()
+            return [v1, v2], tail, [0, 0]
+    if len(nums) == 1 and len(cols_nonempty_with_pos) == 1:
+        tokens = cols_nonempty_with_pos[0][1].split()
         if len(tokens) >= 4:
-            v1, v2 = _try_two_number_split(cols_nonempty[0])
+            v1, v2 = _try_two_number_split(cols_nonempty_with_pos[0][1])
             if v1 is not None and v2 is not None and v1 != 0 and v2 != 0:
                 d1 = len(str(int(abs(v1))))
                 d2 = len(str(int(abs(v2))))
                 if min(d1, d2) >= 3:
                     ratio = min(abs(v1), abs(v2)) / max(abs(v1), abs(v2))
                     if ratio > 0.05:
-                        return [v1, v2], tail
-    return nums, tail
+                        return [v1, v2], tail, [0, 0]
+
+    return nums, tail, positions
 
 
 def _scan_for_field(spec: FieldSpec, page_texts: list[str]) -> dict | None:
@@ -154,7 +172,7 @@ def _scan_for_field(spec: FieldSpec, page_texts: list[str]) -> dict | None:
             for label in spec.norwegian_labels:
                 if not _label_anchor_match(raw, label):
                     continue
-                nums, tail = _extract_columns(raw, label)
+                nums, tail, positions = _extract_columns(raw, label)
                 if len(nums) >= 2:
                     return {
                         "value": nums[-2],
@@ -165,8 +183,19 @@ def _scan_for_field(spec: FieldSpec, page_texts: list[str]) -> dict | None:
                         "label_matched": label,
                         "n_numbers": len(nums),
                     }
+                if len(nums) == 1 and positions and positions[0] >= 2:
+                    return {
+                        "value": None,
+                        "value_prev": nums[0],
+                        "page_idx": page_idx,
+                        "line_idx": line_idx,
+                        "raw_line": raw,
+                        "label_matched": label,
+                        "n_numbers": 1,
+                        "year_column_failed_ocr": True,
+                    }
                 if len(nums) == 0 and line_idx + 1 < len(lines):
-                    next_nums, _ = _extract_columns(lines[line_idx + 1], "")
+                    next_nums, _, _ = _extract_columns(lines[line_idx + 1], "")
                     if len(next_nums) >= 2:
                         return {
                             "value": next_nums[-2],
@@ -179,7 +208,7 @@ def _scan_for_field(spec: FieldSpec, page_texts: list[str]) -> dict | None:
                             "wrapped": True,
                         }
                 if len(nums) == 1 and line_idx + 1 < len(lines):
-                    next_nums, _ = _extract_columns(lines[line_idx + 1], "")
+                    next_nums, _, _ = _extract_columns(lines[line_idx + 1], "")
                     if len(next_nums) == 1:
                         return {
                             "value": nums[0],
