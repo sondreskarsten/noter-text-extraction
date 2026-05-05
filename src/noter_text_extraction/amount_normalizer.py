@@ -94,6 +94,9 @@ def normalize_amount(value, scale: float = 1.0) -> Optional[float]:
     s = re.sub(r"\s*(?:kr\.?|NOK|nok|MNOK|mnok|tNOK|tnok|%)\s*$", "", s, flags=re.IGNORECASE)
     s = re.sub(r"^\s*(?:kr\.?|NOK)\s+", "", s, flags=re.IGNORECASE)
 
+    # OCR digit-letter confusions: 'l'/'I' → '1', 'O'/'o' → '0' when adjacent to digits
+    s = _ocr_digit_substitute(s)
+
     # Handle leading minus inside parens style: "( -1 234 )"
     s = s.replace(" ", " ").replace("\xa0", " ")  # normalize NBSP
 
@@ -169,6 +172,32 @@ def _looks_like_thousands_separator(int_part: str, sep: str) -> bool:
     if len(groups[0]) > 3 or len(groups[0]) == 0:
         return False
     return all(len(g) == 3 and g.isdigit() for g in groups[1:])
+
+
+def _ocr_digit_substitute(s: str) -> str:
+    """Substitute OCR digit-letter confusions when adjacent to digits/spaces.
+
+    Rules:
+        'l' / 'I' → '1' when surrounded by digits, spaces, or string boundaries
+        'O' / 'o' → '0' when in a clearly-numeric context (digit cluster)
+
+    Conservative: a token is only treated as numeric-context if it consists
+    entirely of [digits, l, I, O, o, spaces, NBSP, '.', ',', '-', '(', ')'].
+    """
+    tokens = s.split(" ")
+    out = []
+    for tok in tokens:
+        clean = tok.replace("\u00a0", "")
+        if not clean:
+            out.append(tok)
+            continue
+        candidate = re.sub(r"[lI]", "1", clean)
+        candidate = re.sub(r"[Oo]", "0", candidate)
+        if re.match(r"^[\-(]?[\d.,]+\)?$", candidate):
+            out.append(re.sub(r"[lI]", "1", re.sub(r"[Oo]", "0", tok)))
+        else:
+            out.append(tok)
+    return " ".join(out)
 
 
 def detect_scale(text: str) -> float:
